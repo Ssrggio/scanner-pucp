@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner PUCP a Google Sheets</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin: 0; padding: 20px; background: #f0f2f5; }
+        h2 { color: #1a73e8; }
+        #scanner-container { width: 100%; max-width: 500px; height: 350px; margin: 20px auto; border: 4px solid #1a73e8; border-radius: 12px; position: relative; overflow: hidden; background: #000; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas.drawingBuffer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #resultado { margin-top: 20px; font-size: 1.3em; font-weight: bold; color: #333; min-height: 1.5em; }
+        #status { margin-top: 10px; padding: 10px; border-radius: 5px; display: none; font-weight: bold; }
+        .loading { background: #fff3cd; color: #856404; }
+        .success { background: #d4edda; color: #155724; }
+        .btn { padding: 15px 30px; font-size: 1em; background: #1a73e8; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; transition: background 0.3s; }
+        .btn:hover { background: #1557b0; }
+    </style>
+</head>
+<body>
+
+    <h2>Escáner de Inventario</h2>
+    <div id="scanner-container"></div>
+    
+    <div id="resultado">Listo para escanear...</div>
+    <div id="status"></div>
+
+    <button class="btn" onclick="iniciarEscaner()">Reiniciar Cámara</button>
+
+    <script>
+        // --- CONFIGURACIÓN CORREGIDA ---
+        // Se eliminó la 'T' inicial y se usa la URL de ejecución (.exec)
+        const URL_GOOGLE_SCRIPT = "https://script.google.com/a/macros/pucp.edu.pe/s/AKfycbydkqWlmHCVKb561oT7_dzEJWpk6VvO39keaD_lUrbupPvCoOmoLZHSRmRt1ATwOTz8/exec"; 
+
+        function iniciarEscaner() {
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector('#scanner-container'),
+                    constraints: {
+                        facingMode: "environment", // Prioriza cámara trasera
+                        width: { min: 640 },
+                        height: { min: 480 }
+                    },
+                },
+                decoder: {
+                    // Soportamos los formatos más comunes (EAN, Code 128, etc)
+                    readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader"]
+                },
+                locate: true // Ayuda a encontrar el código en la imagen
+            }, function(err) {
+                if (err) {
+                    console.error("Error al iniciar Quagga:", err);
+                    alert("No se pudo acceder a la cámara. Asegúrate de usar HTTPS o localhost.");
+                    return;
+                }
+                Quagga.start();
+                console.log("Cámara iniciada");
+            });
+        }
+
+        // Se ejecuta cuando la cámara detecta algo que parece un código
+        Quagga.onDetected(function(data) {
+            const code = data.codeResult.code;
+            if (code) {
+                document.getElementById('resultado').innerText = "Código: " + code;
+                // Detenemos el escaneo para procesar el envío
+                Quagga.stop();
+                enviarDatos(code);
+            }
+        });
+
+        async function enviarDatos(barcode) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.style.display = "block";
+            statusDiv.className = "loading";
+            statusDiv.innerText = "Enviando a Google Sheets...";
+            
+            try {
+                // Usamos 'no-cors' porque Google Apps Script no permite peticiones directas desde otros dominios fácilmente
+                await fetch(URL_GOOGLE_SCRIPT, {
+                    method: 'POST',
+                    mode: 'no-cors', 
+                    cache: 'no-cache',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ barcode: barcode })
+                });
+
+                // Con 'no-cors' el navegador no nos deja leer la respuesta, 
+                // así que si no hay error en el fetch, asumimos éxito.
+                statusDiv.className = "success";
+                statusDiv.innerText = "✅ ¡Datos registrados en Excel!";
+                
+                setTimeout(() => {
+                    statusDiv.style.display = "none";
+                    document.getElementById('resultado').innerText = "Esperando siguiente código...";
+                    iniciarEscaner(); // Volvemos a activar la cámara
+                }, 2500);
+
+            } catch (error) {
+                console.error("Error en envío:", error);
+                statusDiv.style.backgroundColor = "#f8d7da";
+                statusDiv.innerText = "❌ Error de conexión.";
+                setTimeout(() => iniciarEscaner(), 3000);
+            }
+        }
+
+        // Iniciar automáticamente al cargar
+        window.onload = iniciarEscaner;
+    </script>
+</body>
+</html>
